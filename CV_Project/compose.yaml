@@ -1,0 +1,29 @@
+services:
+  # The AI Engine
+  ollama:
+    image: ollama/ollama
+    container_name: ollama_engine
+    volumes:
+      - ./ollama_models:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    environment:
+    - OLLAMA_LOAD_TIMEOUT=15m  # Gives your GPU more time to "wake up"
+    - OLLAMA_KEEP_ALIVE=1h  # Keeps the model in memory so the 2nd CV is INSTANT
+
+  # Your Python Application
+  cv-matcher:
+    build: ./app  # Tells Docker to "build" your code into a container
+    container_name: cv_app
+    depends_on:
+      - ollama    # Wait for the AI to start before starting the app
+    volumes:
+      - ./app:/code # Syncs your code so you can edit it in VS Code and it updates live
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
