@@ -1,0 +1,10 @@
+{
+  "name": "cv-matcher-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "echo 'Next.js setup pending'",
+    "build": "echo 'Next.js setup pending'",
+    "start": "echo 'Next.js setup pending'"
+  }
+}

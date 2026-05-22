@@ -1,0 +1,58 @@
+services:
+  # 1. The API Backend
+  api-backend:
+    build: ./api-backend
+    container_name: cv_api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./api-backend:/code
+    env_file:
+      - ./api-backend/.env
+    depends_on:
+      - database
+      - message_broker
+
+  # 2. The Message Broker
+  message_broker:
+    image: redis:alpine
+    container_name: cv_redis
+    ports:
+      - "6379:6379"
+
+  # 3. The AI Worker
+  ai-worker:
+    build: ./ai-worker
+    container_name: cv_worker
+    volumes:
+      - ./ai-worker:/code
+    env_file:
+      - ./api-backend/.env # Share the same env vars (like Gemini key)
+    depends_on:
+      - message_broker
+      - database
+
+  # 4. The Database
+  database:
+    image: postgres:15-alpine
+    container_name: cv_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: cv_matcher
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  # 5. The Frontend UI
+  frontend-ui:
+    build: ./frontend-ui
+    container_name: cv_frontend
+    volumes:
+      - ./frontend-ui:/app
+    ports:
+      - "3000:3000"
+
+volumes:
+  db_data:

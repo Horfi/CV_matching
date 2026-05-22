@@ -1,0 +1,7 @@
+celery
+redis
+playwright
+browser-use
+langgraph
+psycopg2-binary
+sqlalchemy
