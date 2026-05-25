@@ -1,7 +1,5 @@
 celery
 redis
 playwright
+httpx
 browser-use
-langgraph
-psycopg2-binary
-sqlalchemy

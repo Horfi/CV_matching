@@ -3,7 +3,11 @@ FROM node:20-alpine
 WORKDIR /app
 
 COPY package.json .
-# We don't have dependencies yet, so we touch the directory
-# RUN npm install
+RUN npm install
 
-CMD ["sh", "-c", "echo 'Frontend container ready' && tail -f /dev/null"]
+COPY . .
+
+# Expose Next.js port
+EXPOSE 3000
+
+CMD ["npm", "run", "dev"]

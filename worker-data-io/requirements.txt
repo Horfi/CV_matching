@@ -1,0 +1,5 @@
+celery
+redis
+httpx
+google-generativeai
+qdrant-client

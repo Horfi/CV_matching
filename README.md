@@ -2,45 +2,57 @@
 
 A full-stack, AI-driven automation system designed to ingest your CV, find matching job descriptions, and automatically navigate platforms like Workday and Greenhouse to apply on your behalf. 
 
-Powered by **Google Gemini 2.5 Flash** for document intelligence and **Playwright / browser-use** for browser automation.
+Powered by **Google Gemini 2.5 Flash** for document intelligence, **Playwright / browser-use** for browser automation, and **LangGraph** for cognitive orchestration.
 
 ---
 
-## 🏗️ The 5-Container Architecture
+## 🏗️ The 7-Container Architecture
 
-This project is built on a robust, scalable microservices architecture orchestrated by `docker-compose`.
+This project is built on a highly decoupled, production-grade microservices architecture orchestrated by `docker-compose` to ensure robust resource isolation, mitigating memory leaks and system crashes common to headless browser environments.
 
-| Container | Tech Stack | Purpose |
+| Container | Tech Stack | Architecture Pattern / Role |
 | :--- | :--- | :--- |
-| **1. The API Backend** | Python (FastAPI) | **The central brain.** It receives UI requests, talks to the LLM (Gemini 2.5) for fast PDF/Image parsing, and orchestrates tasks. |
-| **2. The Message Broker** | Redis | **The waiting room.** When the API says "apply to these 10 jobs," it drops those tasks into Redis. It ensures tasks aren't lost if the system crashes. |
-| **3. The AI Worker(s)** | Python (Celery) + Playwright | **The heavy lifters.** These containers pick up tasks from Redis, boot up the headless browsers, execute the job applications, and report back. |
-| **4. The Database** | PostgreSQL | **The vault.** Stores user profiles, the extracted CV JSONs, job URLs, and application statuses (Applied, Failed, Interviewing). |
-| **5. The Frontend UI** | Next.js or React | **The dashboard.** Where the user uploads their CV, sets preferences, and views their Kanban board of applications. |
+| **1. Edge Gateway / BFF** | Python (FastAPI) | **The Ambassador.** Serves as the sole public entry point. Manages auth, rate limiting, and aggregates data for the Next.js client. |
+| **2. Orchestration Engine** | LangGraph + FastAPI | **The Control Plane.** Manages graph state, makes cognitive decisions, evaluates CV data via Gemini APIs, and dispatches instructions. |
+| **3. Message Broker** | Redis | **The Nervous System.** Manages task queues, providing asynchronous decoupling between cognitive decision and mechanical action. |
+| **4. Async Data Worker** | Celery (Threaded Pool) | **The I/O Processor.** Dedicated to lightweight async tasks: polling job boards, extracting data with Gemini, and embedding vectors. |
+| **5. Autonomous Browser Worker**| Celery (Solo Pool) + Playwright | **The Execution Plane.** Executes heavy DOM manipulation. Uses the "Death Pact" config (`--max-tasks-per-child`) for pure memory isolation. |
+| **6. Relational State Vault** | PostgreSQL | **Durable Memory.** Stores structured user data, CV profiles, and LangGraph checkpointing states for Human-in-the-Loop (HITL) pauses. |
+| **7. Semantic Vector Store** | Qdrant | **The Matchmaker Core.** Manages high-dimensional embeddings to execute cosine similarity searches between CVs and Jobs. |
+
+*(Note: The system also includes an 8th container for the **Frontend UI** built with Next.js/React).*
 
 ---
 
 ## 🗂️ File Structure
 
-The workspace is organized into discrete service folders:
+The workspace strictly enforces separation of concerns:
 
 ```text
 / (Root)
 │
-├── docker-compose.yml       <-- The master blueprint that connects all 5 containers
-├── README.md                <-- Project documentation
+├── docker-compose.yml           <-- Master orchestration for the distributed system
+├── README.md                    <-- Project documentation
 │
-├── api-backend/             <-- FOLDER 1: FastAPI API
-│   ├── Dockerfile           
-│   ├── main.py              <-- Contains the CV ingestion logic via Gemini
-│   └── requirements.txt     
+├── bff-gateway/                 <-- FOLDER 1: Fast API Gateway (BFF)
+│   ├── Dockerfile               <-- Secure routing & proxying to orchestration engine
+│   └── main.py                  
 │
-├── ai-worker/               <-- FOLDER 2: Celery + Playwright
-│   ├── Dockerfile           <-- Pre-configured with Headless Chromium dependencies
-│   ├── tasks.py             <-- Where browser-use automation tasks will live
-│   └── requirements.txt     
+├── orchestration-engine/        <-- FOLDER 2: LangGraph Control Plane
+│   ├── Dockerfile               
+│   ├── graph.py                 <-- LangGraph node/edge definitions
+│   ├── state.py                 <-- Pydantic state schemas & PG checkpointer
+│   └── main.py                  
 │
-└── frontend-ui/             <-- FOLDER 3: Next.js / React
+├── worker-data-io/              <-- FOLDER 3: Async I/O Data Worker
+│   ├── Dockerfile               <-- Lightweight Python image
+│   └── tasks_api.py             <-- Job fetching, Gemini parsing, Embeddings
+│
+├── worker-browser-heavy/        <-- FOLDER 4: Playwright Heavy Execution
+│   ├── Dockerfile               <-- Includes Chromium binaries & OS dependencies
+│   └── tasks_browser.py         <-- Solo pool browser-use automation logic
+│
+└── frontend-ui/                 <-- FOLDER 5: Next.js / React Presentation Layer
     ├── Dockerfile           
     ├── package.json         
     └── src/                 
@@ -48,16 +60,10 @@ The workspace is organized into discrete service folders:
 
 ---
 
-## 🚀 Development Phases
+## 🚀 System Data Flow & State Management
 
-### Phase 1: The Ingestion Pipeline ✅
-Uses Google Gemini API to process uploaded CVs (PDF, PNG, JPG). Extracts the user's skills, work history, and education into a strict Pydantic-validated JSON model.
-
-### Phase 2: The Browser Agent (Coming Next) ⏳
-Building a standalone worker using `playwright` and `browser-use`. The AI relies on the parsed JSON profile to map your data to job application fields (like Workday setups) and includes a "Human-in-the-Loop" pause to verify information on the final page before submitting.
-
-### Phase 3: The Matchmaker ⏳
-Connecting to job APIs to pull live listings. We'll use embeddings/vector distance to match your scraped CV against 50+ job descriptions and output the top 5 matches.
-
-### Phase 4: The Loop ⏳
-Implementing `LangGraph` and Celery to bind the system. The agent systematically pulls a top match, navigates the URL, attempts the application, prompts for human review, and logs the result back into Postgres.
+**1. Initiation:** The frontend UI requests an application blitz through the BFF Gateway.
+**2. Decision (Orchestration):** LangGraph processes the user's CV via the `worker-data-io` container and matches profiles across embeddings stored in Qdrant.
+**3. Execution (Playwright):** Relevant jobs are enqueued to Redis, consumed by the `worker-browser-heavy` containers. Utilizing isolated ephemeral browser contexts, it performs complex DOM manipulations.
+**4. Human-In-The-Loop (HITL):** At the final verification step on platforms like Workday, Playwright pauses. The Orchestration engine serializes its state directly into PostgreSQL (`langgraph-checkpoint-postgres`).
+**5. Resumption:** Once the user reviews and clicks "Approve", the state is deserialized, signaling the pending Playwright worker via webhook to confirm and complete the application.
