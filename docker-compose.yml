@@ -107,6 +107,33 @@ services:
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000 # Points to BFF Gateway
 
+  # Test Runner (integration-style tests inside compose network)
+  test-runner:
+    image: python:3.11-slim
+    container_name: cv_test_runner
+    working_dir: /app
+    volumes:
+      - ./:/app
+    depends_on:
+      bff-gateway:
+        condition: service_started
+      orchestration-engine:
+        condition: service_started
+      message-broker:
+        condition: service_started
+      worker-data-io:
+        condition: service_started
+      worker-browser-heavy:
+        condition: service_started
+      state-vault:
+        condition: service_healthy
+      vector-store:
+        condition: service_started
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: bash -c "pip install -r requirements-test.txt && python scripts/wait_for_services.py && pytest -v tests"
+    restart: 'no'
+
 volumes:
   pg_state_data:
   qdrant_data:
