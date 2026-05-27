@@ -121,10 +121,6 @@ services:
         condition: service_started
       message-broker:
         condition: service_started
-      worker-data-io:
-        condition: service_started
-      worker-browser-heavy:
-        condition: service_started
       state-vault:
         condition: service_healthy
       vector-store:

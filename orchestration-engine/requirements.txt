@@ -6,4 +6,4 @@ langgraph-checkpoint-postgres
 google-generativeai
 redis
 celery
-psycopg2-binary
+psycopg[binary]==3.2.2

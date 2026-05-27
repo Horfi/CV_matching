@@ -10,6 +10,7 @@ sys.modules.setdefault("psycopg_pool", MagicMock())
 # Load worker-data-io/tasks_api.py as module
 spec = importlib.util.spec_from_file_location("tasks_api", Path("worker-data-io") / "tasks_api.py")
 tasks_module = importlib.util.module_from_spec(spec)
+sys.modules["tasks_api"] = tasks_module
 spec.loader.exec_module(tasks_module)
 
 parse_cv_with_gemini = tasks_module.parse_cv_with_gemini

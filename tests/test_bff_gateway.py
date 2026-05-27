@@ -11,6 +11,7 @@ sys.modules.setdefault("psycopg_pool", MagicMock())
 # Load bff-gateway/main.py as a module
 spec = importlib.util.spec_from_file_location("bff_gateway_main", Path("bff-gateway") / "main.py")
 module = importlib.util.module_from_spec(spec)
+sys.modules["bff_gateway_main"] = module
 spec.loader.exec_module(module)
 
 app = module.app
@@ -25,8 +26,6 @@ def test_root_endpoint():
 
 @patch("bff_gateway_main.httpx.AsyncClient.post")
 def test_trigger_workflow_api(mock_post):
-    import httpx
-
     # Create a mock response object that AsyncClient.post would return
     mock_response = MagicMock()
     mock_response.raise_for_status.return_value = None
@@ -43,8 +42,6 @@ def test_trigger_workflow_api(mock_post):
 
 @patch("bff_gateway_main.httpx.AsyncClient.post")
 def test_resume_workflow_api(mock_post):
-    import httpx
-
     mock_response = MagicMock()
     mock_response.raise_for_status.return_value = None
     mock_response.json.return_value = {"status": "resumed"}

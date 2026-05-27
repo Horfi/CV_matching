@@ -10,10 +10,14 @@ sys.modules.setdefault("psycopg_pool", MagicMock())
 sys.modules.setdefault("langgraph", MagicMock())
 sys.modules.setdefault("langgraph.checkpoint", MagicMock())
 sys.modules.setdefault("langgraph.checkpoint.postgres", MagicMock())
+sys.modules.setdefault("langgraph.graph", MagicMock())
 
 # Load orchestration-engine/main.py as module
-spec = importlib.util.spec_from_file_location("orchestration_main", Path("orchestration-engine") / "main.py")
+engine_path = Path("orchestration-engine").resolve()
+sys.path.insert(0, str(engine_path))
+spec = importlib.util.spec_from_file_location("orchestration_main", engine_path / "main.py")
 orchestrator = importlib.util.module_from_spec(spec)
+sys.modules["orchestration_main"] = orchestrator
 spec.loader.exec_module(orchestrator)
 
 app = orchestrator.app

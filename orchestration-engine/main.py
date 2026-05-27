@@ -16,7 +16,7 @@ app_graph = None
 def on_startup():
     global pool, checkpointer, app_graph
     # Setup PostgreSQL connection pool for the LangGraph Checkpointer
-    pool = ConnectionPool(conninfo=DB_URI, max_size=20)
+    pool = ConnectionPool(conninfo=DB_URI, max_size=20, kwargs={"autocommit": True})
     checkpointer = PostgresSaver(pool)
     
     # Needs PostgresSaver.setup() to establish tables
