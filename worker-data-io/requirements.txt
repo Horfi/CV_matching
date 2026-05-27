@@ -3,3 +3,4 @@ redis
 httpx
 google-generativeai
 qdrant-client
+psycopg[binary]==3.1.19

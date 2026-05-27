@@ -19,12 +19,15 @@ generate_vector_embeddings = tasks_module.generate_vector_embeddings
 
 def test_parse_cv_with_gemini():
     # Calling the Celery task directly as a regular python function
+    import base64
     cv_text = "Experienced software engineer"
-    result = parse_cv_with_gemini(cv_text)
+    base64_cv = base64.b64encode(cv_text.encode("utf-8")).decode("utf-8")
+    
+    result = parse_cv_with_gemini(base64_cv, "text/plain", "cv.txt")
 
     assert result["status"] == "success"
     assert "structured_data" in result
-    assert result["structured_data"]["experience"] == cv_text
+    assert "name" in result["structured_data"]
 
 
 def test_generate_vector_embeddings():

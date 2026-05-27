@@ -127,7 +127,7 @@ services:
         condition: service_started
     environment:
       - PYTHONUNBUFFERED=1
-    command: bash -c "pip install -r requirements-test.txt && python scripts/wait_for_services.py && pytest -v tests"
+    command: bash -c "pip install -r tests/requirements-test.txt && python scripts/wait_for_services.py && pytest -c tests/pytest.ini -v tests"
     restart: 'no'
 
 volumes:

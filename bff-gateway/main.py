@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import httpx
@@ -36,6 +36,25 @@ async def trigger_workflow_api(req: TriggerRequest):
                 f"{ORCHESTRATION_URL}/api/v1/trigger",
                 json=req.dict(),
                 timeout=10.0
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/upload-cv")
+async def upload_cv_api(file: UploadFile = File(...)):
+    """
+    Accepts file upload and forwards it to the Orchestrator.
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            content = await file.read()
+            files = {'file': (file.filename, content, file.content_type)}
+            response = await client.post(
+                f"{ORCHESTRATION_URL}/api/v1/upload-cv",
+                files=files,
+                timeout=30.0
             )
             response.raise_for_status()
             return response.json()

@@ -53,3 +53,18 @@ def test_resume_workflow_api(mock_post):
     assert response.status_code == 200
     assert response.json() == {"status": "resumed"}
     mock_post.assert_called()
+
+
+@patch("bff_gateway_main.httpx.AsyncClient.post")
+def test_upload_cv_api(mock_post):
+    mock_response = MagicMock()
+    mock_response.raise_for_status.return_value = None
+    mock_response.json.return_value = {"status": "started", "thread_id": "test-123"}
+    mock_post.return_value = mock_response
+
+    files = {"file": ("resume.pdf", b"pdf content", "application/pdf")}
+    response = client.post("/api/v1/upload-cv", files=files)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "started", "thread_id": "test-123"}
+    mock_post.assert_called()

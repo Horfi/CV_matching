@@ -7,3 +7,5 @@ google-generativeai
 redis
 celery
 psycopg[binary]==3.2.2
+python-multipart
+

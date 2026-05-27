@@ -55,3 +55,31 @@ def test_app_startup_shutdown(mock_compile_graph, mock_postgres_saver, mock_conn
     # Ensure the pool close was attempted if pool exists
     if mock_connection_pool.return_value:
         mock_connection_pool.return_value.close.assert_called()
+
+
+def test_upload_cv():
+    async def mock_ainvoke(*args, **kwargs):
+        return None
+    orchestrator.app_graph = MagicMock()
+    orchestrator.app_graph.ainvoke = mock_ainvoke
+
+    files = {"file": ("resume.pdf", b"pdf content", "application/pdf")}
+    response = client.post("/api/v1/upload-cv", files=files)
+    assert response.status_code == 200
+    assert "thread_id" in response.json()
+
+
+def test_get_status():
+    mock_state = MagicMock()
+    mock_state.values = {"status": "review_pending", "user_id": "user123"}
+
+    async def mock_aget_state(*args, **kwargs):
+        return mock_state
+
+    orchestrator.app_graph = MagicMock()
+    orchestrator.app_graph.aget_state = mock_aget_state
+
+    response = client.get("/api/v1/status/test_thread")
+    assert response.status_code == 200
+    assert response.json() == {"status": "review_pending", "user_id": "user123"}
+

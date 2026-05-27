@@ -2,7 +2,7 @@
 
 A full-stack, AI-driven automation system designed to ingest your CV, find matching job descriptions, and automatically navigate platforms like Workday and Greenhouse to apply on your behalf. 
 
-Powered by **Google Gemini 2.5 Flash** for document intelligence, **Playwright / browser-use** for browser automation, and **LangGraph** for cognitive orchestration.
+Powered by **Google Gemini 1.5 Flash** for document intelligence, **Playwright / browser-use** for browser automation, and **LangGraph** for cognitive orchestration.
 
 ---
 
@@ -28,19 +28,20 @@ graph TD
     WorkerBrowser -->|Resume Webhook| Orchestrator
 ```
 
-### Component Details
+### Component Details & Connection Ports
 
-| Container | Tech Stack | Architecture Pattern / Role |
-| :--- | :--- | :--- |
-| **1. Edge Gateway / BFF** | Python (FastAPI) | **The Ambassador.** Serves as the sole public entry point. Manages auth, rate limiting, and aggregates data for the Next.js client. |
-| **2. Orchestration Engine** | LangGraph + FastAPI | **The Control Plane.** Manages graph state, makes cognitive decisions, evaluates CV data via Gemini APIs, and dispatches instructions. |
-| **3. Message Broker** | Redis | **The Nervous System.** Manages task queues, providing asynchronous decoupling between cognitive decision and mechanical action. |
-| **4. Async Data Worker** | Celery (Threaded Pool) | **The I/O Processor.** Dedicated to lightweight async tasks: polling job boards, extracting data with Gemini, and embedding vectors. |
-| **5. Autonomous Browser Worker**| Celery (Solo Pool) + Playwright | **The Execution Plane.** Executes heavy DOM manipulation. Uses the "Death Pact" config (`--max-tasks-per-child`) for pure memory isolation. |
-| **6. Relational State Vault** | PostgreSQL | **Durable Memory.** Stores structured user data, CV profiles, and LangGraph checkpointing states for Human-in-the-Loop (HITL) pauses. |
-| **7. Semantic Vector Store** | Qdrant | **The Matchmaker Core.** Manages high-dimensional embeddings to execute cosine similarity searches between CVs and Jobs. |
+Once the stack is running, you can connect directly to the following containers or access their dashboards:
 
-*(Note: The system also includes an 8th container for the **Frontend UI** built with Next.js/React).*
+| Container / Service | Image / Tech | External Port / Connection URI | Description |
+| :--- | :--- | :--- | :--- |
+| **1. Frontend UI** | Next.js / React | `http://localhost:3000` | The user interface dashboard for uploading CVs, inspecting matches, and human approval. |
+| **2. Edge Gateway / BFF** | FastAPI | `http://localhost:8000` (Docs: `/docs`) | The public API gateway. Proxies frontend uploads and status requests to the orchestration engine. |
+| **3. Orchestration Engine** | LangGraph + FastAPI | `http://localhost:8001` (Docs: `/docs`) | The control plane. Compiles the state graph, manages thread runs, handles checkpoints and resumes. |
+| **4. Relational State Vault** | PostgreSQL 15 | `postgresql://user:password@localhost:5432/cv_state` | Persistent database storing CV metadata, seeded job postings, and LangGraph state checkpoints. |
+| **5. Message Broker** | Redis | `redis://localhost:6379/0` | The async task broker. Handles Celery queues and message routing. |
+| **6. Semantic Vector Store** | Qdrant | `http://localhost:6333` (UI: `/dashboard`) | Vector database storing high-dimensional semantic job embeddings for similarity searches. |
+| **7. Async Data Worker** | Celery (Threaded) | *Internal* | Consumes I/O tasks: calls Gemini to parse resumes and generate vector embeddings. |
+| **8. Autonomous Browser Worker**| Celery (Solo) | *Internal* | Consumes execution tasks: launches Playwright in ephemeral containers to automate form submissions. |
 
 ---
 
@@ -62,38 +63,40 @@ Here are the essential commands for running, testing, and debugging the system.
   ```bash
   docker compose down
   ```
-- **Stop and remove all volumes (nuclear reset for databases & caches):**
+- **Stop and remove all volumes (reset databases & vector stores):**
   ```bash
   docker compose down -v
   ```
 
-### 2. Running Tests
+### 2. Seeding Job Postings
+
+To populate PostgreSQL and the Qdrant vector collection with job descriptions before matching:
+1. Boot the stack.
+2. Run the seeding script inside the data worker container:
+   ```bash
+   docker compose exec worker-data-io python /code/seed_jobs.py
+   ```
+
+### 3. Running Tests
 
 - **Run all integration and unit tests:**
   ```bash
   docker compose up --build test-runner
   ```
-  *(This will compile the containers, wait for health checks, run `pytest -v tests`, and exit).*
-  
 - **Run tests and automatically stop/cleanup containers on exit:**
   ```bash
   docker compose up --build --abort-on-container-exit --exit-code-from test-runner test-runner
   ```
 
-### 3. Monitoring & Debugging
+### 4. Monitoring & Debugging
 
 - **Inspect Docker logs in real time:**
   ```bash
   docker compose logs -f <service-name>
-  # Examples:
-  docker compose logs -f bff-gateway
-  docker compose logs -f worker-browser-heavy
   ```
 - **Check Celery worker status & active tasks:**
   ```bash
-  # Check active workers
   docker exec -it cv_worker_data celery -A tasks_api status
-  # Inspect active running tasks
   docker exec -it cv_worker_data celery -A tasks_api inspect active
   ```
 - **Inspect PostgreSQL state tables directly:**
@@ -104,28 +107,6 @@ Here are the essential commands for running, testing, and debugging the system.
   ```bash
   docker exec -it cv_redis redis-cli monitor
   ```
-
-### 4. Direct UI & Swagger Access Points
-
-Once the stack is running, you can access the following services directly from your host machine:
-
-- **Frontend UI Dashboard**: [http://localhost:3000](http://localhost:3000)
-- **Edge Gateway (BFF) API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Orchestration Engine API Docs**: [http://localhost:8001/docs](http://localhost:8001/docs)
-- **Qdrant Vector Database Dashboard**: [http://localhost:6333/dashboard](http://localhost:6333/dashboard)
-
----
-
-## Current Implementation Notes
-
-This section records the current live setup so future changes stay aligned with the repository state.
-
-| Area | Current State | Notes |
-| :--- | :--- | :--- |
-| **Database persistence** | Docker-managed named volume | `state-vault` uses the `pg_state_data` volume mounted at `/var/lib/postgresql/data`. The repo-local `data/postgres/` folder is not used. |
-| **Orchestration startup** | Autocommit enabled | `orchestration-engine/main.py` creates the `ConnectionPool` with `autocommit=True` so `langgraph-checkpoint-postgres` can run setup without transaction errors. |
-| **Testing** | Dynamic mock registration | All unit tests register their dynamic modules in `sys.modules` during imports, ensuring `@patch` decorators can resolve target namespaces during test runs. |
-| **Service map** | 7 product containers + 1 UI container + 1 test runner | The product stack is the 7 core containers described above, plus the Frontend UI. The test runner is used for automated validation. |
 
 ---
 
@@ -138,22 +119,20 @@ The workspace strictly enforces separation of concerns:
 │
 ├── docker-compose.yml           <-- Master orchestration for the distributed system
 ├── README.md                    <-- Project documentation
-├── requirements-test.txt        <-- Dependencies for testing
-├── pytest.ini                   <-- Pytest settings
 │
 ├── bff-gateway/                 <-- Edge Gateway (BFF)
 │   ├── Dockerfile               <-- Multi-stage build for routing & auth
-│   └── main.py                  
+│   └── main.py                  <-- upload-cv and resume endpoints
 │
 ├── orchestration-engine/        <-- LangGraph Control Plane
 │   ├── Dockerfile               
-│   ├── graph.py                 <-- LangGraph workflow nodes/edges definitions
-│   ├── state.py                 <-- Pydantic schemas & state variables
-│   └── main.py                  
+│   ├── graph.py                 <-- LangGraph workflow nodes & wait-for-celery logic
+│   ├── state.py                 <-- Pydantic schemas (AgentState, CVData)
+│   └── main.py                  <-- App setup, database pools, status API
 │
 ├── worker-data-io/              <-- Async I/O Data Worker
 │   ├── Dockerfile               
-│   └── tasks_api.py             <-- Job parsing, Gemini extraction, Embeddings
+│   └── tasks_api.py             <-- Gemini parsing/embeddings & Qdrant query tasks
 │
 ├── worker-browser-heavy/        <-- Playwright Browser automation Worker
 │   ├── Dockerfile               <-- Bundles Playwright, chromium, and system deps
@@ -163,11 +142,17 @@ The workspace strictly enforces separation of concerns:
 │   ├── Dockerfile           
 │   ├── package.json         
 │   └── src/                 
+│       └── app/
+│           ├── page.tsx         <-- Premium file upload & matched jobs UI
+│           └── globals.css      <-- Tailwind CSS imports
 │
 ├── scripts/                     
-│   └── wait_for_services.py     <-- Verification script checking TCP port availability
+│   ├── wait_for_services.py     <-- Verification script checking TCP port availability
+│   └── seed_jobs.py             <-- Script seeding database & vector store with job listings
 │
 └── tests/                       <-- Automated testing suite
+    ├── requirements-test.txt    <-- Dependencies for testing
+    ├── pytest.ini               <-- Pytest settings
     ├── test_bff_gateway.py
     ├── test_orchestration_engine.py
     ├── test_worker_browser_heavy.py
@@ -178,8 +163,10 @@ The workspace strictly enforces separation of concerns:
 
 ## 🚀 System Data Flow & State Management
 
-**1. Initiation:** The frontend UI requests an application blitz through the BFF Gateway.
-**2. Decision (Orchestration):** LangGraph processes the user's CV via the `worker-data-io` container and matches profiles across embeddings stored in Qdrant.
-**3. Execution (Playwright):** Relevant jobs are enqueued to Redis, consumed by the `worker-browser-heavy` containers. Utilizing isolated ephemeral browser contexts, it performs complex DOM manipulations.
-**4. Human-In-The-Loop (HITL):** At the final verification step on platforms like Workday, Playwright pauses. The Orchestration engine serializes its state directly into PostgreSQL (`langgraph-checkpoint-postgres`).
-**5. Resumption:** Once the user reviews and clicks "Approve", the state is deserialized, signaling the pending Playwright worker via webhook to confirm and complete the application.
+**1. CV Ingestion:** The frontend UI requests a CV analysis by uploading a PDF/image resume to the Edge Gateway (`bff-gateway`).
+**2. Graph Inception:** The Gateway forwards it to the Orchestration Engine. A LangGraph thread run is started with a unique ID, and its initial state is checkpointed in PostgreSQL (`state-vault`).
+**3. AI Extraction:** The Orchestration Engine dispatches the raw CV bytes to the Data Worker (`worker-data-io`). Using `gemini-1.5-flash`, the CV is parsed into structured JSON and stored in PostgreSQL.
+**4. Vector Matchmaking:** The CV details are encoded into embeddings using `gemini-embedding-001`. Qdrant indexes are searched for matching jobs, and the full job postings details are fetched from PostgreSQL and returned.
+**5. Ephemeral Execution:** Relevant jobs are enqueued to Redis, consumed by the `worker-browser-heavy` container.
+**6. Human-In-The-Loop (HITL) Checkpoint:** Playwright pauses the application flow before form submission. The Orchestration engine pauses execution, saving the state checkpoint to PostgreSQL.
+**7. Resumption:** Once the candidate reviews the matches on the UI and clicks "Approve & Apply", the state is resumed from PostgreSQL, and the Playwright worker completes the submission.
