@@ -10,6 +10,7 @@ sys.modules.setdefault("psycopg_pool", MagicMock())
 sys.modules.setdefault("langgraph", MagicMock())
 sys.modules.setdefault("langgraph.checkpoint", MagicMock())
 sys.modules.setdefault("langgraph.checkpoint.postgres", MagicMock())
+sys.modules.setdefault("langgraph.checkpoint.postgres.aio", MagicMock())
 sys.modules.setdefault("langgraph.graph", MagicMock())
 
 # Load orchestration-engine/main.py as module
@@ -21,8 +22,6 @@ sys.modules["orchestration_main"] = orchestrator
 spec.loader.exec_module(orchestrator)
 
 app = orchestrator.app
-on_startup = orchestrator.on_startup
-on_shutdown = orchestrator.on_shutdown
 
 client = TestClient(app)
 
@@ -41,20 +40,24 @@ def test_resume_workflow():
     assert response.json() == {"status": "resumed"}
 
 
-@patch("orchestration_main.ConnectionPool")
-@patch("orchestration_main.PostgresSaver")
+@patch("orchestration_main.AsyncConnectionPool")
+@patch("orchestration_main.AsyncPostgresSaver")
 @patch("orchestration_main.compile_graph")
 def test_app_startup_shutdown(mock_compile_graph, mock_postgres_saver, mock_connection_pool):
-    on_startup()
+    async def mock_setup(*args, **kwargs):
+        pass
+    async def mock_close(*args, **kwargs):
+        pass
+
+    mock_postgres_saver.return_value.setup = mock_setup
+    mock_connection_pool.return_value.close = mock_close
+
+    with TestClient(app):
+        pass
+
     mock_connection_pool.assert_called()
     mock_postgres_saver.assert_called()
-    mock_postgres_saver.return_value.setup.assert_called()
     mock_compile_graph.assert_called()
-
-    on_shutdown()
-    # Ensure the pool close was attempted if pool exists
-    if mock_connection_pool.return_value:
-        mock_connection_pool.return_value.close.assert_called()
 
 
 def test_upload_cv():

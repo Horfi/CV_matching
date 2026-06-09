@@ -22,7 +22,8 @@ def parse_cv_node(state: AgentState):
                 state.uploaded_file.get("base64"),
                 state.uploaded_file.get("mime_type"),
                 state.uploaded_file.get("filename")
-            ]
+            ],
+            queue='data_io'
         )
         state.current_task_id = task.id
         
@@ -48,7 +49,8 @@ def evaluate_match_node(state: AgentState):
         state.status = "matching"
         task = celery_app.send_task(
             'tasks_api.generate_vector_embeddings', 
-            args=[state.cv_data.dict()]
+            args=[state.cv_data.dict()],
+            queue='data_io'
         )
         state.current_task_id = task.id
         
@@ -70,14 +72,17 @@ def dispatch_browser_tasks(state: AgentState):
     Dispatches tasks to the Heavy Browser Worker (Playwright) to fill application forms.
     This task is triggered asynchronously and will pause for human approval.
     """
-    if state.matched_jobs:
-        first_job = state.matched_jobs[0]
-        # Dispatch to browser worker
-        task = celery_app.send_task(
-            'tasks_browser.execute_job_application', 
-            args=[first_job.get("url"), state.cv_data.dict(), state.current_task_id]
-        )
-        state.current_task_id = task.id
+    if not state.matched_jobs:
+        return state
+
+    first_job = state.matched_jobs[0]
+    # Dispatch to browser worker
+    task = celery_app.send_task(
+        'tasks_browser.execute_job_application', 
+        args=[first_job.get("url"), state.cv_data.dict(), state.current_task_id],
+        queue='browser_heavy'
+    )
+    state.current_task_id = task.id
     
     state.status = "review_pending"
     return state

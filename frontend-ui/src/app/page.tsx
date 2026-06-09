@@ -222,8 +222,8 @@ export default function Home() {
       <section className="relative z-10 flex-1 max-w-6xl w-full mx-auto p-6 md:p-12 flex flex-col gap-8">
         
         {/* Step 1: Upload */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div className="md:col-span-2 bg-slate-900/40 border border-slate-900 backdrop-blur-md rounded-2xl p-6 md:p-8 shadow-2xl flex flex-col gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 bg-slate-900/40 border border-slate-900 backdrop-blur-md rounded-2xl p-6 md:p-8 shadow-2xl flex flex-col gap-6">
             <h2 className="text-xl font-semibold flex items-center gap-2.5">
               <span className="h-6 w-6 rounded bg-cyan-950 border border-cyan-800 text-cyan-400 text-xs flex items-center justify-center font-bold">1</span>
               CV / Resume Ingestion
@@ -357,7 +357,7 @@ export default function Home() {
                   </div>
                   <div>
                     <span className="text-xs text-slate-500 font-semibold uppercase block tracking-wider">Experience Summary</span>
-                    <p className="text-xs text-slate-400 leading-relaxed mt-1 font-sans line-clamp-[12] whitespace-pre-line">
+                    <p className="text-xs text-slate-400 leading-relaxed mt-1 font-sans max-h-[320px] overflow-y-auto pr-1.5 whitespace-pre-line scrollbar-thin">
                       {state.cv_data.experience || "N/A"}
                     </p>
                   </div>

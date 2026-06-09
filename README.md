@@ -45,6 +45,22 @@ Once the stack is running, you can connect directly to the following containers 
 
 ---
 
+## ⚙️ Configuration & Prerequisites
+
+### Prerequisites
+- **Docker & Docker Compose**: Installed on your system.
+- **WSL 2 (if on Windows)**: Active and integrated with Docker Desktop.
+
+### Environment Setup (`.env`)
+The system requires a `.env` file at the root of the project to supply API credentials.
+Create a `.env` file (if not already present) and configure your Google Gemini API key:
+```env
+GEMINI_API_KEY="your-google-gemini-api-key-here"
+```
+This key is automatically read by Docker Compose and injected into the orchestration and data-worker services.
+
+---
+
 ## 🛠️ Useful Commands & Scripts
 
 Here are the essential commands for running, testing, and debugging the system.
@@ -170,3 +186,18 @@ The workspace strictly enforces separation of concerns:
 **5. Ephemeral Execution:** Relevant jobs are enqueued to Redis, consumed by the `worker-browser-heavy` container.
 **6. Human-In-The-Loop (HITL) Checkpoint:** Playwright pauses the application flow before form submission. The Orchestration engine pauses execution, saving the state checkpoint to PostgreSQL.
 **7. Resumption:** Once the candidate reviews the matches on the UI and clicks "Approve & Apply", the state is resumed from PostgreSQL, and the Playwright worker completes the submission.
+
+---
+
+## 🛠️ Environment Troubleshooting Notes
+
+During setup, two key containerization bugs were resolved to ensure robust compilation and runtime behavior:
+
+### 1. Python Compatibility in `worker-browser-heavy`
+- **Symptom**: `pip install` failed because `browser-use` requires Python `>=3.11`, whereas standard Ubuntu 22.04 base images (like Playwright `jammy` tags) only package Python 3.10.
+- **Solution**: Upgraded `worker-browser-heavy/Dockerfile` to `mcr.microsoft.com/playwright/python:v1.47.0-noble`, which bases the container on Ubuntu 24.04 (Noble Numbat) providing native **Python 3.12** support.
+
+### 2. local Dependencies Masking in `frontend-ui`
+- **Symptom**: The container exited with `sh: next: not found` due to the local volume mount (`./frontend-ui:/app`) masking the `/app/node_modules` directory built during image creation.
+- **Solution**: Added an anonymous volume (`- /app/node_modules`) to the `frontend-ui` service in `docker-compose.yml` to prevent local directory overrides from hiding the container-internal dependencies.
+
