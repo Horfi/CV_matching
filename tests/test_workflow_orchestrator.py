@@ -13,8 +13,8 @@ sys.modules.setdefault("langgraph.checkpoint.postgres", MagicMock())
 sys.modules.setdefault("langgraph.checkpoint.postgres.aio", MagicMock())
 sys.modules.setdefault("langgraph.graph", MagicMock())
 
-# Load orchestration-engine/main.py as module
-engine_path = Path("orchestration-engine").resolve()
+# Load workflow-orchestrator/main.py as module
+engine_path = Path("workflow-orchestrator").resolve()
 sys.path.insert(0, str(engine_path))
 spec = importlib.util.spec_from_file_location("orchestration_main", engine_path / "main.py")
 orchestrator = importlib.util.module_from_spec(spec)

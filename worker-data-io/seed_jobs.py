@@ -90,7 +90,7 @@ def main():
             conn.commit()
 
     print("Connecting to Qdrant at:", QDRANT_URL)
-    qdrant_client = QdrantClient(url=QDRANT_URL)
+    qdrant_client = QdrantClient(url=QDRANT_URL, timeout=60.0)
 
     # Compute a sample embedding to get dimensions dynamically
     print("Fetching dummy embedding to determine dimension size...")

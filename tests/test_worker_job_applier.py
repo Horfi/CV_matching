@@ -8,7 +8,7 @@ sys.modules.setdefault("psycopg", MagicMock())
 sys.modules.setdefault("psycopg_pool", MagicMock())
 
 # Load the tasks_browser module by file path
-spec = importlib.util.spec_from_file_location("tasks_browser", Path("worker-browser-heavy") / "tasks_browser.py")
+spec = importlib.util.spec_from_file_location("tasks_browser", Path("worker-job-applier") / "tasks_browser.py")
 tb = importlib.util.module_from_spec(spec)
 sys.modules["tasks_browser"] = tb
 spec.loader.exec_module(tb)

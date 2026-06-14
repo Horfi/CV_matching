@@ -7,6 +7,9 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "CV Matcher & Automated Application Agent",
   description: "AI-driven recruiting assistant",
+  icons: {
+    icon: "/favicon.ico",
+  },
 };
 
 export default function RootLayout({

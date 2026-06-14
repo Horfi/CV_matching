@@ -49,7 +49,7 @@ def evaluate_match_node(state: AgentState):
         state.status = "matching"
         task = celery_app.send_task(
             'tasks_api.generate_vector_embeddings', 
-            args=[state.cv_data.dict()],
+            args=[state.cv_data.dict(), None, state.source_ids],
             queue='data_io'
         )
         state.current_task_id = task.id

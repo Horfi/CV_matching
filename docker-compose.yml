@@ -10,18 +10,18 @@ services:
     volumes:
       - ./bff-gateway:/code
     environment:
-      - ORCHESTRATION_URL=http://orchestration-engine:8001
+      - ORCHESTRATION_URL=http://workflow-orchestrator:8001
     depends_on:
-      - orchestration-engine
+      - workflow-orchestrator
 
-  # 2. Orchestration Engine (The Control Plane)
-  orchestration-engine:
-    build: ./orchestration-engine
+  # 2. Workflow Orchestrator (The Control Plane)
+  workflow-orchestrator:
+    build: ./workflow-orchestrator
     container_name: cv_orchestrator
     ports:
       - "8001:8001"
     volumes:
-      - ./orchestration-engine:/code
+      - ./workflow-orchestrator:/code
     environment:
       - REDIS_URL=redis://message-broker:6379/0
       - DATABASE_URL=postgresql://user:password@state-vault:5432/cv_state
@@ -54,18 +54,18 @@ services:
       - vector-store
     command: celery -A tasks_api worker -Q data_io --concurrency=20 -l info
 
-  # 5. Autonomous Browser Worker (The Execution Plane / Playwright)
-  worker-browser-heavy:
-    build: ./worker-browser-heavy
+  # 5. Autonomous Job Applier Worker (Playwright Execution Plane)
+  worker-job-applier:
+    build: ./worker-job-applier
     container_name: cv_worker_browser
     volumes:
-      - ./worker-browser-heavy:/code
+      - ./worker-job-applier:/code
     environment:
       - REDIS_URL=redis://message-broker:6379/0
-      - API_WEBHOOK_URL=http://orchestration-engine:8001/webhook/resume
+      - API_WEBHOOK_URL=http://workflow-orchestrator:8001/webhook/resume
     depends_on:
       - message-broker
-      - orchestration-engine
+      - workflow-orchestrator
     # The Death Pact config: 1 process, recycle after 10 tasks to clear memory leaks
     command: celery -A tasks_browser worker -Q browser_heavy -P solo --max-tasks-per-child=10 -l info
 
@@ -118,7 +118,7 @@ services:
     depends_on:
       bff-gateway:
         condition: service_started
-      orchestration-engine:
+      workflow-orchestrator:
         condition: service_started
       message-broker:
         condition: service_started
@@ -128,8 +128,32 @@ services:
         condition: service_started
     environment:
       - PYTHONUNBUFFERED=1
-    command: bash -c "pip install -r tests/requirements-test.txt && python scripts/wait_for_services.py && pytest -c tests/pytest.ini -v tests"
+    command: bash -c "pip install -r tests/requirements-test.txt && python tests/wait_for_services.py && pytest -c tests/pytest.ini -v tests"
     restart: 'no'
+
+  # 8. Self-Hosted fastCRW Engine (Rust-native crawler)
+  fastcrw:
+    image: ghcr.io/us/crw:latest
+    container_name: cv_fastcrw
+    ports:
+      - "3002:3000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    restart: always
+
+  # 9. Scraper Worker (Celery task executor)
+  worker-scraper:
+    build: ./worker-scraper
+    container_name: cv_worker_scraper
+    volumes:
+      - ./worker-scraper:/code
+    environment:
+      - REDIS_URL=redis://message-broker:6379/0
+      - FIRECRAWL_API_URL=http://fastcrw:3000
+    depends_on:
+      - message-broker
+      - fastcrw
+    command: celery -A celery_app worker -Q scraper --concurrency=5 -l info
 
 volumes:
   pg_state_data:

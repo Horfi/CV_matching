@@ -4,7 +4,7 @@ import sys
 
 services = [
     ("bff-gateway", 8000),
-    ("orchestration-engine", 8001),
+    ("workflow-orchestrator", 8001),
     ("message-broker", 6379),
     ("state-vault", 5432),
     ("vector-store", 6333),

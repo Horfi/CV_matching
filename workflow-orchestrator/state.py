@@ -16,3 +16,5 @@ class AgentState(BaseModel):
     current_task_id: Optional[str] = None
     status: str = "initial" # initial, matching, review_pending, submitted
     human_approved: bool = False
+    source_ids: List[int] = Field(default_factory=list)
+

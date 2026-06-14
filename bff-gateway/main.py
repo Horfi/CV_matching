@@ -15,7 +15,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ORCHESTRATION_URL = os.getenv("ORCHESTRATION_URL", "http://orchestration-engine:8001")
+ORCHESTRATION_URL = os.getenv("ORCHESTRATION_URL", "http://workflow-orchestrator:8001")
 
 class TriggerRequest(BaseModel):
     user_id: str
@@ -26,7 +26,7 @@ async def root():
     return {"message": "BFF Gateway is running"}
 
 @app.post("/api/v1/trigger")
-async def trigger_workflow_api(req: TriggerRequest):
+async def trigger_workflow_api(req: dict):
     """
     Direct route to start the application process via Orchestrator
     """
@@ -34,7 +34,7 @@ async def trigger_workflow_api(req: TriggerRequest):
         try:
             response = await client.post(
                 f"{ORCHESTRATION_URL}/api/v1/trigger",
-                json=req.dict(),
+                json=req,
                 timeout=10.0
             )
             response.raise_for_status()
@@ -55,6 +55,25 @@ async def upload_cv_api(file: UploadFile = File(...)):
                 f"{ORCHESTRATION_URL}/api/v1/upload-cv",
                 files=files,
                 timeout=30.0
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/extract-cv")
+async def extract_cv_api(file: UploadFile = File(...)):
+    """
+    Accepts file upload, forwards it to the Orchestrator, and returns extracted JSON data.
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            content = await file.read()
+            files = {'file': (file.filename, content, file.content_type)}
+            response = await client.post(
+                f"{ORCHESTRATION_URL}/api/v1/extract-cv",
+                files=files,
+                timeout=60.0
             )
             response.raise_for_status()
             return response.json()
