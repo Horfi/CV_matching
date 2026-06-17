@@ -17,6 +17,7 @@ interface JobMatch {
   url: string;
   skills: string;
   score: number;
+  source_id?: number;
 }
 
 interface ScrapingSource {
@@ -25,6 +26,7 @@ interface ScrapingSource {
   name: string;
   type: string;
   status: string;
+  is_default: boolean;
   last_scraped_at: string | null;
   created_at: string | null;
 }
@@ -54,12 +56,25 @@ export default function Home() {
   const [newSourceName, setNewSourceName] = useState("");
   const [newSourceType, setNewSourceType] = useState("careers_page");
   const [isScraping, setIsScraping] = useState(false);
+  const [sourceTab, setSourceTab] = useState<'all' | 'default' | 'custom'>('all');
+
+  // Matches Filtering States
+  const [visibleMatchesCount, setVisibleMatchesCount] = useState<number>(15);
+  const [minMatchScore, setMinMatchScore] = useState<number>(30); // default to 30% min score
+  const [companyFilter, setCompanyFilter] = useState<string>("");
+  const [matchOriginFilter, setMatchOriginFilter] = useState<'all' | 'default' | 'custom'>('all');
 
   // Profile Editor States
   const [extractedCv, setExtractedCv] = useState<CVData | null>(null);
 
   // Apply Selection States
   const [selectedJobs, setSelectedJobs] = useState<string[]>([]);
+
+  const filteredSources = sources.filter((src) => {
+    if (sourceTab === "default") return src.is_default;
+    if (sourceTab === "custom") return !src.is_default;
+    return true;
+  });
   
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -69,8 +84,15 @@ export default function Home() {
     try {
       const res = await fetch("http://localhost:8000/api/v1/scraping/sources");
       if (res.ok) {
-        const data = await res.json();
+        const data: ScrapingSource[] = await res.json();
         setSources(data);
+        // Automatically select defaults on first load
+        setSelectedSources((prev) => {
+          if (prev.length === 0) {
+            return data.filter((s) => s.is_default).map((s) => s.id);
+          }
+          return prev;
+        });
       }
     } catch (err) {
       console.error("Failed to fetch sources", err);
@@ -251,12 +273,33 @@ export default function Home() {
       });
 
       if (res.ok) {
+        const addedSource: ScrapingSource = await res.json();
         setNewSourceUrl("");
         setNewSourceName("");
+        setSelectedSources((prev) => [...prev, addedSource.id]);
         fetchSources();
       }
     } catch (err) {
       console.error("Failed to add source", err);
+    }
+  };
+
+  const handleDeleteSource = async (id: number) => {
+    if (!confirm("Are you sure you want to delete this source and all its matched jobs?")) return;
+    try {
+      const res = await fetch(`http://localhost:8000/api/v1/scraping/sources/${id}`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        fetchSources();
+        setSelectedSources(selectedSources.filter((sid) => sid !== id));
+      } else {
+        const data = await res.json();
+        alert(data.detail || "Failed to delete source.");
+      }
+    } catch (err) {
+      console.error("Failed to delete source", err);
+      alert("Error deleting source.");
     }
   };
 
@@ -269,10 +312,10 @@ export default function Home() {
   };
 
   const toggleAllSources = () => {
-    if (selectedSources.length === sources.length) {
+    if (selectedSources.length === filteredSources.length) {
       setSelectedSources([]);
     } else {
-      setSelectedSources(sources.map((s) => s.id));
+      setSelectedSources(filteredSources.map((s) => s.id));
     }
   };
 
@@ -325,12 +368,44 @@ export default function Home() {
     }
   };
 
+  const matchedJobs = state?.matched_jobs || [];
+  const defaultSourceIds = sources.filter(s => s.is_default).map(s => s.id);
+  const customSourceIds = sources.filter(s => !s.is_default).map(s => s.id);
+
+  const filteredMatches = matchedJobs
+    .filter((job) => {
+      const scorePct = Math.round(job.score * 100);
+      const matchesScore = scorePct >= minMatchScore;
+      const matchesCompany = companyFilter
+        ? job.company.toLowerCase().includes(companyFilter.toLowerCase())
+        : true;
+      
+      let matchesOrigin = true;
+      if (matchOriginFilter === "default") {
+        matchesOrigin = job.source_id 
+          ? defaultSourceIds.includes(job.source_id) 
+          : !customSourceIds.some(cid => {
+              const src = sources.find(s => s.id === cid);
+              return src && job.url.toLowerCase().includes(src.url.toLowerCase());
+            });
+      } else if (matchOriginFilter === "custom") {
+        matchesOrigin = job.source_id 
+          ? customSourceIds.includes(job.source_id) 
+          : customSourceIds.some(cid => {
+              const src = sources.find(s => s.id === cid);
+              return src && job.url.toLowerCase().includes(src.url.toLowerCase());
+            });
+      }
+
+      return matchesScore && matchesCompany && matchesOrigin;
+    })
+    .slice(0, visibleMatchesCount);
+
   const toggleAllJobs = () => {
-    const matched = state?.matched_jobs || [];
-    if (selectedJobs.length === matched.length) {
+    if (selectedJobs.length === filteredMatches.length) {
       setSelectedJobs([]);
     } else {
-      setSelectedJobs(matched.map((j) => j.url));
+      setSelectedJobs(filteredMatches.map((j) => j.url));
     }
   };
 
@@ -466,65 +541,131 @@ export default function Home() {
             </form>
 
             {/* Right Column: Table of Existing Sources */}
-            <div className="lg:col-span-2 overflow-x-auto border border-slate-200 rounded-xl">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider">
-                    <th className="px-4 py-3 text-center w-12">
-                      <input
-                        type="checkbox"
-                        checked={sources.length > 0 && selectedSources.length === sources.length}
-                        onChange={toggleAllSources}
-                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                    </th>
-                    <th className="px-4 py-3">Source Name</th>
-                    <th className="px-4 py-3">Type</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Last Crawled</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {sources.length > 0 ? (
-                    sources.map((src) => (
-                      <tr key={src.id} className="hover:bg-slate-50/40">
-                        <td className="px-4 py-3 text-center">
-                          <input
-                            type="checkbox"
-                            checked={selectedSources.includes(src.id)}
-                            onChange={() => toggleSourceSelection(src.id)}
-                            className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                          />
-                        </td>
-                        <td className="px-4 py-3 font-semibold text-slate-800">
-                          <div>{src.name}</div>
-                          <div className="text-[10px] text-slate-400 font-normal truncate max-w-[280px]">{src.url}</div>
-                        </td>
-                        <td className="px-4 py-3 text-slate-500 uppercase text-[10px]">
-                          {src.type === 'careers_page' ? 'Listing' : 'Detail'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium border ${
-                            src.status === 'completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                            src.status === 'scraping' ? 'bg-indigo-50 text-indigo-700 border-indigo-200 animate-pulse' :
-                            src.status === 'failed' ? 'bg-rose-50 text-rose-700 border-rose-200' :
-                            'bg-slate-50 text-slate-600 border-slate-200'
-                          }`}>
-                            {src.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-slate-400">
-                          {src.last_scraped_at ? new Date(src.last_scraped_at).toLocaleString() : 'Never'}
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-slate-400 italic">No crawling sources configured.</td>
+            <div className="lg:col-span-2 flex flex-col gap-3">
+              {/* Tab Filters */}
+              <div className="flex gap-1.5 bg-slate-100 p-1 rounded-lg self-start">
+                <button
+                  type="button"
+                  onClick={() => setSourceTab("all")}
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-md transition ${sourceTab === "all" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                >
+                  All ({sources.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSourceTab("default")}
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-md transition ${sourceTab === "default" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                >
+                  System Defaults ({sources.filter(s => s.is_default).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSourceTab("custom")}
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-md transition ${sourceTab === "custom" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+                >
+                  Custom ({sources.filter(s => !s.is_default).length})
+                </button>
+              </div>
+
+              <div className="overflow-x-auto border border-slate-200 rounded-xl bg-white">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider">
+                      <th className="px-4 py-3 text-center w-12">
+                        <input
+                          type="checkbox"
+                          checked={filteredSources.length > 0 && filteredSources.every(s => selectedSources.includes(s.id))}
+                          onChange={toggleAllSources}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      </th>
+                      <th className="px-4 py-3">Source Name</th>
+                      <th className="px-4 py-3">Type</th>
+                      <th className="px-4 py-3">Origin</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Last Crawled</th>
+                      <th className="px-4 py-3 text-center w-16">Action</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredSources.length > 0 ? (
+                      filteredSources.map((src) => (
+                        <tr key={src.id} className="hover:bg-slate-50/40">
+                          <td className="px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedSources.includes(src.id)}
+                              onChange={() => toggleSourceSelection(src.id)}
+                              className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-slate-800">
+                            <div>{src.name}</div>
+                            <div className="text-[10px] text-slate-400 font-normal truncate max-w-[280px]">{src.url}</div>
+                          </td>
+                          <td className="px-4 py-3 text-slate-500 uppercase text-[10px]">
+                            {src.type === 'careers_page' ? 'Listing' : 'Detail'}
+                          </td>
+                          <td className="px-4 py-3">
+                            {src.is_default ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold bg-indigo-50 border border-indigo-200 text-indigo-700 shadow-sm" title="System Default Source">
+                                <svg className="w-3.5 h-3.5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                </svg>
+                                Default
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold bg-amber-50 border border-amber-200 text-amber-700 shadow-sm" title="User Custom Source (Added Before)">
+                                <svg className="w-3.5 h-3.5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                Added Before
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium border ${
+                              src.status === 'completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                              src.status === 'scraping' ? 'bg-indigo-50 text-indigo-700 border-indigo-200 animate-pulse' :
+                              src.status === 'failed' ? 'bg-rose-50 text-rose-700 border-rose-200' :
+                              'bg-slate-50 text-slate-600 border-slate-200'
+                            }`}>
+                              {src.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-400">
+                            {src.last_scraped_at ? new Date(src.last_scraped_at).toLocaleString() : 'Never'}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {!src.is_default ? (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteSource(src.id)}
+                                className="text-rose-500 hover:text-rose-700 p-1 hover:bg-rose-50 rounded transition inline-flex items-center justify-center"
+                                title="Delete Custom Source"
+                              >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </button>
+                            ) : (
+                              <span className="text-slate-300 inline-flex items-center justify-center" title="System default sources cannot be deleted">
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                </svg>
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-8 text-center text-slate-400 italic">No sources match the selected filter.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
@@ -705,20 +846,95 @@ export default function Home() {
             </div>
 
             <div className="flex flex-col gap-4">
-              {state.matched_jobs && state.matched_jobs.length > 0 ? (
+              {/* Interactive Filters & Slider Controls */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-slate-50 border border-slate-200/60 p-4 rounded-xl">
+                <div className="flex flex-col gap-1.5">
+                  <label className="block text-xs font-semibold text-slate-700">Display Limit: <span className="text-indigo-600 font-bold">{visibleMatchesCount} jobs</span></label>
+                  <input
+                    type="range"
+                    min="5"
+                    max="100"
+                    step="5"
+                    value={visibleMatchesCount}
+                    onChange={(e) => setVisibleMatchesCount(Number(e.target.value))}
+                    className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  />
+                  <div className="flex justify-between text-[10px] text-slate-400">
+                    <span>5 matches</span>
+                    <span>100 matches</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="block text-xs font-semibold text-slate-700">Minimum Match Score: <span className="text-indigo-600 font-bold">{minMatchScore}%</span></label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="5"
+                    value={minMatchScore}
+                    onChange={(e) => setMinMatchScore(Number(e.target.value))}
+                    className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  />
+                  <div className="flex justify-between text-[10px] text-slate-400">
+                    <span>0%</span>
+                    <span>100%</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="block text-xs font-semibold text-slate-700">Filter by Company</label>
+                  <input
+                    type="text"
+                    value={companyFilter}
+                    onChange={(e) => setCompanyFilter(e.target.value)}
+                    placeholder="e.g. Nvidia, Google, YouTube"
+                    className="w-full text-xs border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-800 focus:outline-none focus:border-indigo-500 font-medium"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="block text-xs font-semibold text-slate-700">Source Origin</label>
+                  <div className="flex bg-white border border-slate-200 rounded-lg p-0.5 w-full h-[32px] items-center">
+                    <button
+                      type="button"
+                      onClick={() => setMatchOriginFilter('all')}
+                      className={`flex-1 text-[10px] font-bold py-1 rounded transition ${matchOriginFilter === 'all' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMatchOriginFilter('default')}
+                      className={`flex-1 text-[10px] font-bold py-1 rounded transition ${matchOriginFilter === 'default' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      Defaults
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMatchOriginFilter('custom')}
+                      className={`flex-1 text-[10px] font-bold py-1 rounded transition ${matchOriginFilter === 'custom' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      Added Before
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {filteredMatches.length > 0 ? (
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-500">
                     <input
                       type="checkbox"
-                      checked={selectedJobs.length === state.matched_jobs.length}
+                      checked={selectedJobs.length > 0 && filteredMatches.every((j) => selectedJobs.includes(j.url))}
                       onChange={toggleAllJobs}
                       className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 mr-2"
                     />
-                    <span>Select All Matches</span>
+                    <span>Select All Matches ({filteredMatches.length} shown)</span>
                   </div>
 
                   <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl bg-white overflow-hidden">
-                    {state.matched_jobs.map((job) => (
+                    {filteredMatches.map((job) => (
                       <div key={job.job_id} className="hover:bg-slate-50/45 p-4 flex items-start md:items-center gap-4 transition-all">
                         <div className="pt-1 md:pt-0">
                           <input
@@ -763,7 +979,7 @@ export default function Home() {
                   </div>
                 </div>
               ) : (
-                <div className="text-slate-400 italic text-center py-16 text-sm">No job matches found. Please configure sources and match your CV.</div>
+                <div className="text-slate-400 italic text-center py-16 text-sm">No job matches found matching selected criteria. Please adjust filters or match your CV.</div>
               )}
             </div>
           </div>

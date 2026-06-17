@@ -113,7 +113,7 @@ def generate_vector_embeddings(self, cv_data: dict, job_postings: list = None, s
             db_ops.store_cached_embedding(text_hash, cv_vector)
 
         # Connect to Qdrant and query
-        points = qdrant_ops.query_similar_jobs(cv_vector, limit=5, source_ids=source_ids)
+        points = qdrant_ops.query_similar_jobs(cv_vector, limit=100, source_ids=source_ids)
         matched_job_ids = [hit.id for hit in points]
         scores = {hit.id: hit.score for hit in points}
 
@@ -126,13 +126,13 @@ def generate_vector_embeddings(self, cv_data: dict, job_postings: list = None, s
             with conn.cursor() as cur:
                 if source_ids:
                     cur.execute("""
-                        SELECT id, title, company, description, url, skills
+                        SELECT id, title, company, description, url, skills, source_id
                         FROM jobs
                         WHERE id = ANY(%s) AND source_id = ANY(%s)
                     """, (matched_job_ids, source_ids))
                 else:
                     cur.execute("""
-                        SELECT id, title, company, description, url, skills
+                        SELECT id, title, company, description, url, skills, source_id
                         FROM jobs
                         WHERE id = ANY(%s)
                     """, (matched_job_ids,))
@@ -147,6 +147,7 @@ def generate_vector_embeddings(self, cv_data: dict, job_postings: list = None, s
                         "description": row[3],
                         "url": row[4],
                         "skills": row[5],
+                        "source_id": row[6],
                         "score": round(rescale_score(scores.get(job_id, 0.0)), 3)
                     })
 
@@ -269,8 +270,7 @@ def update_source_status(source_id: int, status: str):
     name='tasks_api.parse_and_sync_listing',
     bind=True,
     max_retries=10,
-    default_retry_delay=15,
-    rate_limit='4/m'
+    default_retry_delay=15
 )
 def parse_and_sync_listing(self, source_id: int, markdown_content: str, base_url: str):
     """
@@ -300,7 +300,7 @@ def parse_and_sync_listing(self, source_id: int, markdown_content: str, base_url
     bind=True,
     max_retries=10,
     default_retry_delay=15,
-    rate_limit='4/m'
+    rate_limit='30/m'
 )
 def parse_and_save_job_detail(self, source_id: int, job_url: str, markdown_content: str):
     """
@@ -337,4 +337,32 @@ def parse_and_save_job_detail(self, source_id: int, job_url: str, markdown_conte
         logger.error("Failed to parse and save job detail for %s: %s", job_url, exc)
         db_ops.update_source_status(source_id, 'failed')
         raise exc
+
+
+@app.task(name='tasks_api.delete_source')
+def delete_source(source_id: int):
+    """Deletes a source and all its associated jobs from both DB and Qdrant."""
+    try:
+        db_ops.ensure_db_schema()
+        # 1. Get all job IDs for this source
+        with psycopg.connect(config.DB_URI) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM jobs WHERE source_id = %s", (source_id,))
+                job_ids = [row[0] for row in cur.fetchall()]
+        
+        # 2. Delete points from Qdrant
+        if job_ids:
+            qdrant_ops.delete_qdrant_points(job_ids)
+            
+        # 3. Delete source from PostgreSQL (cascades to jobs)
+        with psycopg.connect(config.DB_URI) as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM scraping_sources WHERE id = %s", (source_id,))
+            conn.commit()
+        logger.info("Deleted source %s and %s associated jobs from DB & Qdrant", source_id, len(job_ids))
+        return f"Deleted source {source_id} and {len(job_ids)} jobs."
+    except Exception as exc:
+        logger.error("Failed to delete source %s: %s", source_id, exc)
+        raise exc
+
 

@@ -204,7 +204,7 @@ def parse_job_listing_programmatically(markdown_content: str, base_url: str = No
         if is_same_domain or is_ats:
             # Filter out generic/non-job pages
             if any(ignored in u_path for ignored in [
-                "/privacy", "/terms", "/about", "/help", "/contact", "/login", "/register",
+                "/privacy", "/terms", "/help", "/contact", "/login", "/register",
                 "/cookies", "/eeo", "/faq", "/how-we-hire", "/my-applications", "/settings"
             ]):
                 continue
@@ -221,6 +221,8 @@ def parse_job_listing_programmatically(markdown_content: str, base_url: str = No
             ]
             
             if is_job_detail and not is_main_listing:
+                if "/jobs/jobs/" in full_url:
+                    full_url = full_url.replace("/jobs/jobs/", "/jobs/")
                 title = clean_job_title_from_url(full_url, "")
                 jobs.append({"title": title, "url": full_url})
                 
@@ -234,10 +236,7 @@ def parse_job_listing_programmatically(markdown_content: str, base_url: str = No
             
     # Fallback to defaults if no links discovered
     if not deduped_jobs:
-        deduped_jobs = [
-            {"title": "Senior Software Engineer (Google Cloud)", "url": "https://www.google.com/about/careers/applications/jobs/results/mock-1"},
-            {"title": "DevOps Engineer (SRE)", "url": "https://www.google.com/about/careers/applications/jobs/results/mock-2"}
-        ]
+        deduped_jobs = []
         
     return {"jobs": deduped_jobs}
 

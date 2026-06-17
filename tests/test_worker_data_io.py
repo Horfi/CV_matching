@@ -256,7 +256,7 @@ def test_embedding_cache_miss_then_hit(monkeypatch):
 
     # psycopg mock for jobs fetch
     conn, cur = _make_conn_ctx()
-    cur.fetchall.return_value = [(1, "Dev", "Acme", "Build stuff", "http://job", "Python")]
+    cur.fetchall.return_value = [(1, "Dev", "Acme", "Build stuff", "http://job", "Python", 1)]
 
     monkeypatch.setattr(db_ops, "get_cached_embedding", fake_get_embedding)
     monkeypatch.setattr(db_ops, "store_cached_embedding", fake_store_embedding)
@@ -458,7 +458,7 @@ def test_generate_vector_embeddings_source_filtering(mock_embed, mock_query, moc
     # Mock Postgres return row
     cur = MagicMock()
     cur.fetchall.return_value = [
-        (42, "Nvidia Developer", "Nvidia", "Description", "http://nvidia.com", "Python, CUDA")
+        (42, "Nvidia Developer", "Nvidia", "Description", "http://nvidia.com", "Python, CUDA", 101)
     ]
     conn = MagicMock()
     conn.__enter__ = MagicMock(return_value=conn)
@@ -476,7 +476,7 @@ def test_generate_vector_embeddings_source_filtering(mock_embed, mock_query, moc
     result = generate_vector_embeddings(cv_data, source_ids=[101])
     
     # Verify Qdrant filter was called with source_ids
-    mock_query.assert_called_once_with(mock_embed.return_value, limit=5, source_ids=[101])
+    mock_query.assert_called_once_with(mock_embed.return_value, limit=100, source_ids=[101])
     
     # Verify DB query was filtered by both matched IDs and source_ids
     assert cur.execute.called
@@ -509,8 +509,8 @@ def test_generate_vector_embeddings_statistical_guard(mock_embed, mock_query, mo
     
     cur = MagicMock()
     cur.fetchall.return_value = [
-        (10, "Job A", "Company A", "Desc A", "http://a.com", "Skill A"),
-        (11, "Job B", "Company B", "Desc B", "http://b.com", "Skill B")
+        (10, "Job A", "Company A", "Desc A", "http://a.com", "Skill A", 1),
+        (11, "Job B", "Company B", "Desc B", "http://b.com", "Skill B", 1)
     ]
     conn = MagicMock()
     conn.__enter__ = MagicMock(return_value=conn)
@@ -531,6 +531,28 @@ def test_generate_vector_embeddings_statistical_guard(mock_embed, mock_query, mo
     assert len(matches) == 2
     assert matches[0]["score"] == 0.0
     assert matches[1]["score"] == 0.0
+
+
+def test_rescale_score_quantitative_values():
+    """Verify that rescale_score scales raw similarity scores to the correct quantitative percentages."""
+    from tasks_api import rescale_score
+    
+    # Boundary Cases
+    assert rescale_score(0.59) == 0.0
+    assert rescale_score(0.60) == 0.0
+    assert rescale_score(0.80) == 1.0
+    assert rescale_score(0.81) == 1.0
+    
+    # Linear rescaling checks
+    import pytest
+    assert rescale_score(0.70) == pytest.approx(0.50)
+    assert rescale_score(0.65) == pytest.approx(0.25)
+    assert rescale_score(0.75) == pytest.approx(0.75)
+    
+    # Precision checks
+    assert abs(rescale_score(0.61) - 0.05) < 1e-9
+    assert abs(rescale_score(0.79) - 0.95) < 1e-9
+
 
 
 

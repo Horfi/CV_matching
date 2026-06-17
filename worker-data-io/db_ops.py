@@ -34,10 +34,29 @@ def ensure_db_schema():
                     name VARCHAR(255) NOT NULL,
                     type VARCHAR(50) DEFAULT 'careers_page',
                     status VARCHAR(50) DEFAULT 'idle',
+                    is_default BOOLEAN DEFAULT FALSE,
                     last_scraped_at TIMESTAMPTZ,
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 );
             """)
+            
+            cur.execute("""
+                ALTER TABLE scraping_sources ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE;
+            """)
+
+            # Seed default sources
+            default_sources = [
+                ("https://www.google.com/about/careers/applications/jobs/results", "Google Careers", "careers_page"),
+                ("https://www.google.com/about/careers/applications/jobs/results?q=youtube", "YouTube Careers", "careers_page"),
+                ("https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite", "Nvidia Careers", "careers_page")
+            ]
+            for url, name, s_type in default_sources:
+                cur.execute("""
+                    INSERT INTO scraping_sources (url, name, type, is_default, status)
+                    VALUES (%s, %s, %s, TRUE, 'idle')
+                    ON CONFLICT (url) DO UPDATE
+                    SET is_default = TRUE;
+                """, (url, name, s_type))
             
             # 3. Add source_id to jobs table if not exists
             cur.execute("""

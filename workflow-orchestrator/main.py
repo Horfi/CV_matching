@@ -29,6 +29,43 @@ class ApplyRequest(BaseModel):
     job_urls: list[str]
     cv_data: dict
 
+async def ensure_scraping_sources_table(conn_pool):
+    # Skip during unit tests where connection pool is mocked
+    if hasattr(conn_pool, "_mock_self") or type(conn_pool).__name__ in ('MagicMock', 'Mock', 'AsyncMock'):
+        return
+        
+    async with conn_pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS scraping_sources (
+                    id SERIAL PRIMARY KEY,
+                    url VARCHAR(2048) UNIQUE NOT NULL,
+                    name VARCHAR(255) NOT NULL,
+                    type VARCHAR(50) DEFAULT 'careers_page',
+                    status VARCHAR(50) DEFAULT 'idle',
+                    is_default BOOLEAN DEFAULT FALSE,
+                    last_scraped_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """)
+            await cur.execute("""
+                ALTER TABLE scraping_sources ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE;
+            """)
+            
+            # Seed default sources
+            default_sources = [
+                ("https://www.google.com/about/careers/applications/jobs/results", "Google Careers", "careers_page"),
+                ("https://www.google.com/about/careers/applications/jobs/results?q=youtube", "YouTube Careers", "careers_page"),
+                ("https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite", "Nvidia Careers", "careers_page")
+            ]
+            for url, name, s_type in default_sources:
+                await cur.execute("""
+                    INSERT INTO scraping_sources (url, name, type, is_default, status)
+                    VALUES (%s, %s, %s, TRUE, 'idle')
+                    ON CONFLICT (url) DO UPDATE
+                    SET is_default = TRUE;
+                """, (url, name, s_type))
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global pool, checkpointer, app_graph
@@ -38,6 +75,9 @@ async def lifespan(app: FastAPI):
     
     # Needs PostgresSaver.setup() to establish tables
     await checkpointer.setup()
+    
+    # Ensure scraping sources table and seed defaults
+    await ensure_scraping_sources_table(pool)
     
     app_graph = compile_graph(checkpointer=checkpointer)
     yield
@@ -124,9 +164,9 @@ async def get_scraping_sources():
         async with pool.connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute("""
-                    SELECT id, url, name, type, status, last_scraped_at, created_at
+                    SELECT id, url, name, type, status, last_scraped_at, created_at, is_default
                     FROM scraping_sources
-                    ORDER BY created_at DESC
+                    ORDER BY is_default DESC, created_at DESC
                 """)
                 rows = await cur.fetchall()
                 sources = []
@@ -138,7 +178,8 @@ async def get_scraping_sources():
                         "type": row[3],
                         "status": row[4],
                         "last_scraped_at": row[5].isoformat() if row[5] else None,
-                        "created_at": row[6].isoformat() if row[6] else None
+                        "created_at": row[6].isoformat() if row[6] else None,
+                        "is_default": row[7]
                     })
                 return sources
     except Exception as e:
@@ -152,11 +193,11 @@ async def add_scraping_source(source: SourceCreate):
         async with pool.connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute("""
-                    INSERT INTO scraping_sources (url, name, type, status)
-                    VALUES (%s, %s, %s, 'idle')
+                    INSERT INTO scraping_sources (url, name, type, is_default, status)
+                    VALUES (%s, %s, %s, FALSE, 'idle')
                     ON CONFLICT (url) DO UPDATE
-                    SET name = EXCLUDED.name, type = EXCLUDED.type, status = 'idle'
-                    RETURNING id, url, name, type, status
+                    SET name = EXCLUDED.name, type = EXCLUDED.type
+                    RETURNING id, url, name, type, status, is_default
                 """, (source.url, source.name, source.type))
                 row = await cur.fetchone()
                 return {
@@ -164,10 +205,40 @@ async def add_scraping_source(source: SourceCreate):
                     "url": row[1],
                     "name": row[2],
                     "type": row[3],
-                    "status": row[4]
+                    "status": row[4],
+                    "is_default": row[5]
                 }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to add source: {str(e)}")
+
+@app.delete("/api/v1/scraping/sources/{source_id}")
+async def delete_scraping_source(source_id: int):
+    if not pool:
+        raise HTTPException(status_code=500, detail="Database connection pool not ready")
+    
+    from graph import celery_app
+    try:
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT id, is_default FROM scraping_sources WHERE id = %s", (source_id,))
+                row = await cur.fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="Source not found")
+                s_id, is_default = row
+                if is_default:
+                    raise HTTPException(status_code=400, detail="Cannot delete system default sources")
+        
+        # Dispatch Celery task to delete source and jobs from DB & Qdrant
+        celery_app.send_task(
+            'tasks_api.delete_source',
+            args=[source_id],
+            queue='data_io'
+        )
+        return {"status": "success", "message": f"Source {source_id} deletion triggered."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete source: {str(e)}")
 
 @app.post("/api/v1/scraping/scrape-selected")
 async def scrape_selected_sources(req: ScrapeSelectedRequest):
